@@ -7,8 +7,8 @@ allowed-tools: Bash(git log*), Bash(git diff*), Bash(git push*), Bash(git rev-pa
 ## Step 1 — Collect Branch Info
 
 ```bash
-git log main...HEAD --oneline
-git diff main...HEAD --stat
+git log develop...HEAD --oneline
+git diff develop...HEAD --stat
 ```
 
 ## Step 2 — Read Changed Files
@@ -43,7 +43,7 @@ gh api user --jq '.login'
 
 ```bash
 git push -u origin HEAD
-gh pr create --base main \
+gh pr create --base develop \
   --title "<title>" \
   --body "$(cat /tmp/pr-body.md)" \
   --assignee "@me"
