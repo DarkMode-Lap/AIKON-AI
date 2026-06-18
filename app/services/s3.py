@@ -18,6 +18,8 @@ def _make_client():
 
 
 def _download_sync(s3_uri: str) -> bytes:
+    if not s3_uri.startswith("s3://"):
+        raise ValueError(f"올바르지 않은 S3 URI 형식입니다: {s3_uri}")
     without_scheme = s3_uri[len("s3://") :]
     bucket, _, key = without_scheme.partition("/")
     client = _make_client()
