@@ -2,7 +2,7 @@
 name: resolve-reviews
 description: Collect PR review comments, critically assess each one against project conventions, auto-apply valid ones, post refutation replies for invalid ones, and prompt for partial ones.
 disable-model-invocation: true
-allowed-tools: Bash(bash *get-pr-data.sh:*), Bash(gh api:*), Bash(gh pr view:*), Bash(gh repo:*), Bash(git add:*), Bash(git commit:*), Bash(git log:*), Bash(git push:*), Bash(git rev-parse:*), Bash(rm:*), Edit, Read
+allowed-tools: Bash(bash *get-pr-data.sh:*), Bash(gh api:*), Bash(gh pr view:*), Bash(gh repo:*), Bash(git log:*), Bash(git push:*), Bash(git rev-parse:*), Bash(rm:*), Edit, Read, Skill
 ---
 
 ## Step 1 — Collect PR Data
@@ -58,10 +58,9 @@ Always cite a specific source in the rationale (e.g. `.claude/rules/python-style
 
 1. Read the target file with the Read tool
 2. Apply the reviewer's concern with the Edit tool
-3. Commit the changes:
-   ```bash
-   git add <file>
-   git commit -m "fix :: 리뷰 반영 — <변경 내용 한 줄 요약>"
+3. VALID 판정 파일을 모두 수정한 뒤, `/git-commit` 스킬을 호출해 논리적으로 묶어 커밋한다:
+   ```
+   Skill("git-commit")
    ```
 4. Record the short commit hash:
    ```bash
