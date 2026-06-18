@@ -24,3 +24,7 @@ env/
 # OS
 .DS_Store
 Thumbs.db
+
+# Harness
+.claude/command.log
+.pr-tmp/

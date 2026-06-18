@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+
 from app.services.gemini import chat, chat_stream
 
 router = APIRouter(prefix="/chat", tags=["chat"])
