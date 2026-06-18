@@ -15,14 +15,6 @@ logger = logging.getLogger(__name__)
 
 
 async def process_avatar_job(job_id: str, req: AvatarGenerationRequest) -> None:
-    async with AsyncSessionLocal() as session:
-        job = await session.get(AvatarGenerationJob, job_id)
-        if job is None:
-            logger.error("job_id=%s 를 찾을 수 없음", job_id)
-            return
-        job.status = JobStatus.PROCESSING
-        await session.commit()
-
     error_code: str | None = None
     error_message: str | None = None
     generated_uri: str | None = None
@@ -32,6 +24,14 @@ async def process_avatar_job(job_id: str, req: AvatarGenerationRequest) -> None:
     start_time = time.monotonic()
 
     try:
+        async with AsyncSessionLocal() as session:
+            job = await session.get(AvatarGenerationJob, job_id)
+            if job is None:
+                logger.error("job_id=%s 를 찾을 수 없음", job_id)
+                return
+            job.status = JobStatus.PROCESSING
+            await session.commit()
+
         source_bytes = await s3.download_image(req.sourceImageUri)
         prompt_text, prompt_version = prompt.build_prompt(req.style, req.ageRange, req.gender)
         output_bytes = await gemini_image.generate_avatar_image(source_bytes, prompt_text)
