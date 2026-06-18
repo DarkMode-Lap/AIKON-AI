@@ -22,6 +22,8 @@ def _download_sync(s3_uri: str) -> bytes:
         raise ValueError(f"올바르지 않은 S3 URI 형식입니다: {s3_uri}")
     without_scheme = s3_uri[len("s3://") :]
     bucket, _, key = without_scheme.partition("/")
+    if not bucket or not key:
+        raise ValueError(f"S3 URI에서 버킷 또는 키를 파싱할 수 없습니다: {s3_uri}")
     client = _make_client()
     response = client.get_object(Bucket=bucket, Key=key)
     return response["Body"].read()
