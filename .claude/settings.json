@@ -34,7 +34,8 @@
       "Bash(gh label*)",
       "Bash(find *)",
       "Bash(bash *)",
-      "Bash(rm -rf .pr-tmp)"
+      "Bash(rm -rf .pr-tmp)",
+      "Skill"
     ]
   },
   "hooks": {
