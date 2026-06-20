@@ -1,14 +1,13 @@
 from __future__ import annotations
 
-import json
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.database import get_session
-from app.db.models import AvatarFeedback, AvatarGenerationJob
+from app.db.models import AvatarFeedback, AvatarFeedbackReason, AvatarGenerationJob
 from app.schemas.metrics import (
     FeedbackMetrics,
     GenerationMetrics,
@@ -28,7 +27,7 @@ async def get_generation_metrics(
     days: int = Query(default=30, ge=1),
     session: AsyncSession = Depends(get_session),
 ) -> GenerationMetrics:
-    since = datetime.utcnow() - timedelta(days=days)
+    since = datetime.now(UTC) - timedelta(days=days)
 
     def _base_where(stmt):
         stmt = stmt.where(AvatarGenerationJob.created_at >= since)
@@ -106,7 +105,7 @@ async def get_feedback_metrics(
     days: int = Query(default=30, ge=1),
     session: AsyncSession = Depends(get_session),
 ) -> FeedbackMetrics:
-    since = datetime.utcnow() - timedelta(days=days)
+    since = datetime.now(UTC) - timedelta(days=days)
 
     def _base_where(stmt):
         stmt = stmt.where(AvatarFeedback.created_at >= since)
@@ -169,16 +168,17 @@ async def get_feedback_metrics(
         for r in (await session.execute(version_stmt)).all()
     }
 
-    reasons_stmt = _base_where(select(AvatarFeedback.reasons))
-    reason_counts: dict[str, int] = {}
-    for (reasons_str,) in (await session.execute(reasons_stmt)).all():
-        try:
-            reasons = json.loads(reasons_str)
-            if isinstance(reasons, list):
-                for reason in reasons:
-                    reason_counts[reason] = reason_counts.get(reason, 0) + 1
-        except (json.JSONDecodeError, TypeError):
-            continue
+    reasons_stmt = _base_where(
+        select(
+            AvatarFeedbackReason.reason,
+            func.count(AvatarFeedbackReason.id).label("cnt"),
+        )
+        .join(AvatarFeedbackReason, AvatarFeedback.id == AvatarFeedbackReason.feedback_id)
+        .group_by(AvatarFeedbackReason.reason)
+    )
+    reason_counts: dict[str, int] = {
+        r.reason: r.cnt for r in (await session.execute(reasons_stmt)).all()
+    }
 
     return FeedbackMetrics(
         totalCount=total,
