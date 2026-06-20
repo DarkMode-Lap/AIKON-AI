@@ -5,11 +5,18 @@ from google.genai import types
 
 from app.core.config import settings
 
-_client = genai.Client(api_key=settings.gemini_api_key)
+_client: genai.Client | None = None
+
+
+def _get_client() -> genai.Client:
+    global _client
+    if _client is None:
+        _client = genai.Client(api_key=settings.gemini_api_key)
+    return _client
 
 
 async def generate_avatar_image(source_bytes: bytes, prompt: str) -> bytes:
-    response = await _client.aio.models.generate_content(
+    response = await _get_client().aio.models.generate_content(
         model=settings.gemini_image_model,
         contents=[
             types.Part.from_bytes(data=source_bytes, mime_type="image/png"),
