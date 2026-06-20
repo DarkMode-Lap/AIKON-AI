@@ -33,5 +33,4 @@ async def ingest_feedback(
     )
     session.add(feedback)
     await session.commit()
-    await session.refresh(feedback)
     return FeedbackIngestResponse(feedbackId=feedback.id)

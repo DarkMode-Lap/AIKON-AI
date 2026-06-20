@@ -23,7 +23,7 @@ async def export_dataset(
     result = await session.execute(stmt)
     feedbacks = result.scalars().all()
 
-    job_ids = [f.job_id for f in feedbacks if f.job_id]
+    job_ids = list({f.job_id for f in feedbacks if f.job_id})
     jobs_by_id: dict[str, AvatarGenerationJob] = {}
     if job_ids:
         job_result = await session.execute(
@@ -36,6 +36,12 @@ async def export_dataset(
 
     for f in feedbacks:
         job = jobs_by_id.get(f.job_id) if f.job_id else None
+        try:
+            reasons = json.loads(f.reasons)
+            if not isinstance(reasons, list):
+                reasons = []
+        except (json.JSONDecodeError, TypeError):
+            reasons = []
         row = DatasetRow(
             input={
                 "prompt": job.prompt_text if job else None,
@@ -49,7 +55,7 @@ async def export_dataset(
             },
             metadata={
                 "rating": f.rating,
-                "reasons": json.loads(f.reasons),
+                "reasons": reasons,
                 "promptVersion": f.prompt_version,
                 "modelName": f.model_name,
             },

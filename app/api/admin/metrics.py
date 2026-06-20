@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 import json
-from collections import defaultdict
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import select
+from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.database import get_session
@@ -31,56 +30,72 @@ async def get_generation_metrics(
 ) -> GenerationMetrics:
     since = datetime.utcnow() - timedelta(days=days)
 
-    stmt = select(AvatarGenerationJob).where(AvatarGenerationJob.created_at >= since)
-    if style:
-        stmt = stmt.where(AvatarGenerationJob.style == style)
-    if prompt_version:
-        stmt = stmt.where(AvatarGenerationJob.prompt_version == prompt_version)
+    def _base_where(stmt):
+        stmt = stmt.where(AvatarGenerationJob.created_at >= since)
+        if style:
+            stmt = stmt.where(AvatarGenerationJob.style == style)
+        if prompt_version:
+            stmt = stmt.where(AvatarGenerationJob.prompt_version == prompt_version)
+        return stmt
 
-    result = await session.execute(stmt)
-    jobs = result.scalars().all()
+    total_stmt = _base_where(
+        select(
+            func.count(AvatarGenerationJob.id).label("total"),
+            func.sum(case((AvatarGenerationJob.status == "COMPLETED", 1), else_=0)).label(
+                "completed"
+            ),
+            func.sum(case((AvatarGenerationJob.status == "FAILED", 1), else_=0)).label("failed"),
+            func.avg(AvatarGenerationJob.duration_ms).label("avg_duration"),
+        )
+    )
+    row = (await session.execute(total_stmt)).one()
+    total = row.total or 0
+    completed = row.completed or 0
+    failed = row.failed or 0
+    avg_duration = float(row.avg_duration) if row.avg_duration is not None else None
 
-    total = len(jobs)
-    completed = sum(1 for j in jobs if j.status == "COMPLETED")
-    failed = sum(1 for j in jobs if j.status == "FAILED")
-    success_rate = completed / total if total else 0.0
+    style_stmt = _base_where(
+        select(
+            AvatarGenerationJob.style,
+            func.count(AvatarGenerationJob.id).label("count"),
+            func.sum(case((AvatarGenerationJob.status == "COMPLETED", 1), else_=0)).label(
+                "completed"
+            ),
+        ).group_by(AvatarGenerationJob.style)
+    )
+    by_style = {
+        r.style: StyleStat(
+            count=r.count,
+            successRate=r.completed / r.count if r.count else 0.0,
+        )
+        for r in (await session.execute(style_stmt)).all()
+    }
 
-    durations = [j.duration_ms for j in jobs if j.duration_ms is not None]
-    avg_duration = sum(durations) / len(durations) if durations else None
-
-    by_style: dict[str, dict] = defaultdict(lambda: {"count": 0, "completed": 0})
-    for j in jobs:
-        by_style[j.style]["count"] += 1
-        if j.status == "COMPLETED":
-            by_style[j.style]["completed"] += 1
-
-    by_prompt: dict[str, dict] = defaultdict(lambda: {"count": 0, "completed": 0})
-    for j in jobs:
-        key = j.prompt_version or "unknown"
-        by_prompt[key]["count"] += 1
-        if j.status == "COMPLETED":
-            by_prompt[key]["completed"] += 1
+    version_stmt = _base_where(
+        select(
+            func.coalesce(AvatarGenerationJob.prompt_version, "unknown").label("version"),
+            func.count(AvatarGenerationJob.id).label("count"),
+            func.sum(case((AvatarGenerationJob.status == "COMPLETED", 1), else_=0)).label(
+                "completed"
+            ),
+        ).group_by(func.coalesce(AvatarGenerationJob.prompt_version, "unknown"))
+    )
+    by_prompt = {
+        r.version: PromptVersionStat(
+            count=r.count,
+            successRate=r.completed / r.count if r.count else 0.0,
+        )
+        for r in (await session.execute(version_stmt)).all()
+    }
 
     return GenerationMetrics(
         totalCount=total,
         completedCount=completed,
         failedCount=failed,
-        successRate=success_rate,
+        successRate=completed / total if total else 0.0,
         avgDurationMs=avg_duration,
-        byStyle={
-            k: StyleStat(
-                count=v["count"],
-                successRate=v["completed"] / v["count"] if v["count"] else 0.0,
-            )
-            for k, v in by_style.items()
-        },
-        byPromptVersion={
-            k: PromptVersionStat(
-                count=v["count"],
-                successRate=v["completed"] / v["count"] if v["count"] else 0.0,
-            )
-            for k, v in by_prompt.items()
-        },
+        byStyle=by_style,
+        byPromptVersion=by_prompt,
     )
 
 
@@ -93,65 +108,86 @@ async def get_feedback_metrics(
 ) -> FeedbackMetrics:
     since = datetime.utcnow() - timedelta(days=days)
 
-    stmt = select(AvatarFeedback).where(AvatarFeedback.created_at >= since)
-    if style:
-        stmt = stmt.where(AvatarFeedback.style == style)
-    if prompt_version:
-        stmt = stmt.where(AvatarFeedback.prompt_version == prompt_version)
+    def _base_where(stmt):
+        stmt = stmt.where(AvatarFeedback.created_at >= since)
+        if style:
+            stmt = stmt.where(AvatarFeedback.style == style)
+        if prompt_version:
+            stmt = stmt.where(AvatarFeedback.prompt_version == prompt_version)
+        return stmt
 
-    result = await session.execute(stmt)
-    feedbacks = result.scalars().all()
-
-    total = len(feedbacks)
-    likes = sum(1 for f in feedbacks if f.rating == "LIKE")
-    dislikes = total - likes
-    like_rate = likes / total if total else 0.0
-
-    reason_counts: dict[str, int] = defaultdict(int)
-    for f in feedbacks:
-        for reason in json.loads(f.reasons):
-            reason_counts[reason] += 1
-
-    by_style: dict[str, dict] = defaultdict(lambda: {"like": 0, "dislike": 0})
-    for f in feedbacks:
-        if f.rating == "LIKE":
-            by_style[f.style]["like"] += 1
-        else:
-            by_style[f.style]["dislike"] += 1
-
-    by_prompt: dict[str, dict] = defaultdict(lambda: {"like": 0, "dislike": 0})
-    for f in feedbacks:
-        key = f.prompt_version or "unknown"
-        if f.rating == "LIKE":
-            by_prompt[key]["like"] += 1
-        else:
-            by_prompt[key]["dislike"] += 1
-
-    def _feedback_stat(v: dict) -> StyleFeedbackStat:
-        total_v = v["like"] + v["dislike"]
-        return StyleFeedbackStat(
-            likeCount=v["like"],
-            dislikeCount=v["dislike"],
-            likeRate=v["like"] / total_v if total_v else 0.0,
+    total_stmt = _base_where(
+        select(
+            func.count(AvatarFeedback.id).label("total"),
+            func.sum(case((AvatarFeedback.rating == "LIKE", 1), else_=0)).label("likes"),
+            func.sum(case((AvatarFeedback.training_consent.is_(True), 1), else_=0)).label(
+                "training_consent"
+            ),
+            func.sum(case((AvatarFeedback.feedback_use_consent.is_(True), 1), else_=0)).label(
+                "feedback_use"
+            ),
         )
+    )
+    row = (await session.execute(total_stmt)).one()
+    total = row.total or 0
+    likes = row.likes or 0
+    dislikes = total - likes
+
+    style_stmt = _base_where(
+        select(
+            AvatarFeedback.style,
+            func.sum(case((AvatarFeedback.rating == "LIKE", 1), else_=0)).label("likes"),
+            func.sum(case((AvatarFeedback.rating == "DISLIKE", 1), else_=0)).label("dislikes"),
+        ).group_by(AvatarFeedback.style)
+    )
+    by_style = {
+        r.style: StyleFeedbackStat(
+            likeCount=r.likes or 0,
+            dislikeCount=r.dislikes or 0,
+            likeRate=(r.likes or 0) / ((r.likes or 0) + (r.dislikes or 0))
+            if (r.likes or 0) + (r.dislikes or 0)
+            else 0.0,
+        )
+        for r in (await session.execute(style_stmt)).all()
+    }
+
+    version_stmt = _base_where(
+        select(
+            func.coalesce(AvatarFeedback.prompt_version, "unknown").label("version"),
+            func.sum(case((AvatarFeedback.rating == "LIKE", 1), else_=0)).label("likes"),
+            func.sum(case((AvatarFeedback.rating == "DISLIKE", 1), else_=0)).label("dislikes"),
+        ).group_by(func.coalesce(AvatarFeedback.prompt_version, "unknown"))
+    )
+    by_prompt = {
+        r.version: PromptVersionFeedbackStat(
+            likeCount=r.likes or 0,
+            dislikeCount=r.dislikes or 0,
+            likeRate=(r.likes or 0) / ((r.likes or 0) + (r.dislikes or 0))
+            if (r.likes or 0) + (r.dislikes or 0)
+            else 0.0,
+        )
+        for r in (await session.execute(version_stmt)).all()
+    }
+
+    reasons_stmt = _base_where(select(AvatarFeedback.reasons))
+    reason_counts: dict[str, int] = {}
+    for (reasons_str,) in (await session.execute(reasons_stmt)).all():
+        try:
+            reasons = json.loads(reasons_str)
+            if isinstance(reasons, list):
+                for reason in reasons:
+                    reason_counts[reason] = reason_counts.get(reason, 0) + 1
+        except (json.JSONDecodeError, TypeError):
+            continue
 
     return FeedbackMetrics(
         totalCount=total,
         likeCount=likes,
         dislikeCount=dislikes,
-        likeRate=like_rate,
-        byReason=dict(reason_counts),
-        byStyle={k: _feedback_stat(v) for k, v in by_style.items()},
-        byPromptVersion={
-            k: PromptVersionFeedbackStat(
-                likeCount=v["like"],
-                dislikeCount=v["dislike"],
-                likeRate=v["like"] / (v["like"] + v["dislike"])
-                if (v["like"] + v["dislike"])
-                else 0.0,
-            )
-            for k, v in by_prompt.items()
-        },
-        trainingConsentCount=sum(1 for f in feedbacks if f.training_consent),
-        feedbackUseConsentCount=sum(1 for f in feedbacks if f.feedback_use_consent),
+        likeRate=likes / total if total else 0.0,
+        byReason=reason_counts,
+        byStyle=by_style,
+        byPromptVersion=by_prompt,
+        trainingConsentCount=row.training_consent or 0,
+        feedbackUseConsentCount=row.feedback_use or 0,
     )
