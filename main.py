@@ -7,11 +7,13 @@ from app.api.ai import router as ai_router
 from app.api.v1 import router as v1_router
 from app.core.config import settings
 from app.db.database import init_db
+from app.db.vector_store import ensure_feedback_collection
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
+    await ensure_feedback_collection()
     yield
 
 

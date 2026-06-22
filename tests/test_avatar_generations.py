@@ -3,7 +3,9 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from app.db.database import Base, engine, init_db
+from app.db.database import AsyncSessionLocal, Base, engine, init_db
+from app.db.models import AvatarGenerationJob
+from app.services.rag import RagContextResult
 from main import app
 
 
@@ -27,7 +29,9 @@ def sample_request() -> dict:
     }
 
 
-def _make_mocks():
+def _make_mocks(rag_result: RagContextResult | None = None):
+    if rag_result is None:
+        rag_result = RagContextResult(context="", retrieved_feedback_ids=[])
     return (
         patch(
             "app.services.avatar_job_processor.s3.download_image",
@@ -48,13 +52,18 @@ def _make_mocks():
             "app.services.avatar_job_processor.callback.send_callback",
             new_callable=AsyncMock,
         ),
+        patch(
+            "app.services.avatar_job_processor.rag.retrieve_rag_context",
+            new_callable=AsyncMock,
+            return_value=rag_result,
+        ),
     )
 
 
 @pytest.mark.asyncio
 async def test_create_avatar_generation_returns_accepted(sample_request):
-    dl, gen, ul, cb = _make_mocks()
-    with dl, gen, ul, cb:
+    dl, gen, ul, cb, rag = _make_mocks()
+    with dl, gen, ul, cb, rag:
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post("/ai/avatar-generations", json=sample_request)
 
@@ -73,8 +82,8 @@ async def test_get_job_status_not_found():
 
 @pytest.mark.asyncio
 async def test_get_job_status_found(sample_request):
-    dl, gen, ul, cb = _make_mocks()
-    with dl, gen, ul, cb:
+    dl, gen, ul, cb, rag = _make_mocks()
+    with dl, gen, ul, cb, rag:
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             create_resp = await client.post("/ai/avatar-generations", json=sample_request)
             job_id = create_resp.json()["jobId"]
@@ -84,3 +93,30 @@ async def test_get_job_status_found(sample_request):
     body = status_resp.json()
     assert body["jobId"] == job_id
     assert body["avatarId"] == 1
+
+
+@pytest.mark.asyncio
+async def test_avatar_generation_saves_rag_metadata(sample_request):
+    dl, gen, ul, cb, rag = _make_mocks(
+        RagContextResult(
+            context="Use the following prior avatar feedback as guidance.",
+            retrieved_feedback_ids=[1, 2],
+        )
+    )
+
+    with dl, gen as gen_mock, ul, cb, rag:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            create_resp = await client.post("/ai/avatar-generations", json=sample_request)
+            job_id = create_resp.json()["jobId"]
+
+    async with AsyncSessionLocal() as session:
+        job = await session.get(AvatarGenerationJob, job_id)
+
+    assert job is not None
+    assert job.rag_enabled is True
+    assert job.retrieved_feedback_ids == "[1, 2]"
+    assert job.prompt_text is not None
+    assert job.prompt_text.startswith("Use the following prior avatar feedback as guidance.")
+    gen_mock.assert_awaited_once()
+    generated_prompt = gen_mock.await_args.args[1]
+    assert generated_prompt == job.prompt_text
