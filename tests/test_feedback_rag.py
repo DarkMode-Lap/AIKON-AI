@@ -190,6 +190,7 @@ async def test_qdrant_collection_init_failure_uses_cooldown(monkeypatch):
 
     monkeypatch.setattr(vector_store, "_client", client)
     monkeypatch.setattr(vector_store, "_collection_ready", False)
+    monkeypatch.setattr(vector_store, "_collection_lock", None)
     monkeypatch.setattr(vector_store, "_last_collection_init_failure_at", None)
     monkeypatch.setattr(vector_store, "COLLECTION_INIT_RETRY_SECONDS", 30.0)
 

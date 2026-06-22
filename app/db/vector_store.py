@@ -25,7 +25,7 @@ COLLECTION_INIT_RETRY_SECONDS = 30.0
 
 _client: AsyncQdrantClient | None = None
 _collection_ready = False
-_collection_lock = asyncio.Lock()
+_collection_lock: asyncio.Lock | None = None
 _last_collection_init_failure_at: float | None = None
 
 
@@ -37,13 +37,15 @@ def _get_client() -> AsyncQdrantClient:
 
 
 async def ensure_feedback_collection() -> None:
-    global _collection_ready, _last_collection_init_failure_at
+    global _collection_lock, _collection_ready, _last_collection_init_failure_at
     if _collection_ready:
         return
     if _last_collection_init_failure_at is not None:
         elapsed = time.monotonic() - _last_collection_init_failure_at
         if elapsed < COLLECTION_INIT_RETRY_SECONDS:
             return
+    if _collection_lock is None:
+        _collection_lock = asyncio.Lock()
     async with _collection_lock:
         if _collection_ready:
             return
