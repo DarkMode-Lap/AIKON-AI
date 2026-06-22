@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import time
 
@@ -9,7 +10,7 @@ from google.genai.errors import APIError
 from app.db.database import AsyncSessionLocal
 from app.db.models import AvatarGenerationJob
 from app.schemas.avatar import AvatarCallbackPayload, AvatarGenerationRequest, JobStatus
-from app.services import callback, gemini_image, prompt, s3
+from app.services import callback, gemini_image, prompt, rag, s3
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +21,8 @@ async def process_avatar_job(job_id: str, req: AvatarGenerationRequest) -> None:
     generated_uri: str | None = None
     prompt_text: str | None = None
     prompt_version: str | None = None
+    rag_enabled = False
+    retrieved_feedback_ids: list[int] = []
     status = JobStatus.COMPLETED
     start_time = time.monotonic()
 
@@ -33,7 +36,13 @@ async def process_avatar_job(job_id: str, req: AvatarGenerationRequest) -> None:
             await session.commit()
 
         source_bytes = await s3.download_image(req.sourceImageUri)
-        prompt_text, prompt_version = prompt.build_prompt(req.style, req.ageRange, req.gender)
+        base_prompt, prompt_version = prompt.build_prompt(req.style, req.ageRange, req.gender)
+        rag_result = await rag.retrieve_rag_context(req.style, req.gender, req.ageRange)
+        rag_enabled = bool(rag_result.context)
+        retrieved_feedback_ids = rag_result.retrieved_feedback_ids
+        prompt_text = (
+            f"{rag_result.context}\n\n{base_prompt}" if rag_result.context else base_prompt
+        )
         output_bytes = await gemini_image.generate_avatar_image(source_bytes, prompt_text)
         generated_uri = await s3.upload_image(output_bytes, req.avatarId)
 
@@ -70,6 +79,10 @@ async def process_avatar_job(job_id: str, req: AvatarGenerationRequest) -> None:
                 job.model_name = model_name
                 job.prompt_version = prompt_version
                 job.prompt_text = prompt_text
+                job.rag_enabled = rag_enabled
+                job.retrieved_feedback_ids = (
+                    json.dumps(retrieved_feedback_ids) if retrieved_feedback_ids else None
+                )
                 job.duration_ms = duration_ms
                 job.error_code = error_code
                 job.error_message = error_message
