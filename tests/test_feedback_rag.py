@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from app.db import vector_store
 from app.db.database import Base, engine, init_db
 from app.schemas.avatar import AvatarAgeRange, AvatarGender, AvatarStyle
 from app.services.feedback_pipeline import build_rag_document, process_feedback_for_rag
@@ -175,3 +176,24 @@ async def test_ingest_feedback_registers_snapshot_background_task(monkeypatch, i
         "promptVersion": "v1",
         "modelName": "gemini-test",
     }
+
+
+@pytest.mark.asyncio
+async def test_qdrant_collection_init_failure_uses_cooldown(monkeypatch):
+    class FailingClient:
+        async def collection_exists(self, collection_name: str) -> bool:
+            raise TimeoutError(collection_name)
+
+    client = FailingClient()
+    collection_exists = AsyncMock(side_effect=client.collection_exists)
+    client.collection_exists = collection_exists
+
+    monkeypatch.setattr(vector_store, "_client", client)
+    monkeypatch.setattr(vector_store, "_collection_ready", False)
+    monkeypatch.setattr(vector_store, "_last_collection_init_failure_at", None)
+    monkeypatch.setattr(vector_store, "COLLECTION_INIT_RETRY_SECONDS", 30.0)
+
+    await vector_store.ensure_feedback_collection()
+    await vector_store.ensure_feedback_collection()
+
+    assert collection_exists.await_count == 1

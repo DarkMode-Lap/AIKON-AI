@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from typing import Any
 
 from qdrant_client import AsyncQdrantClient
@@ -20,10 +21,12 @@ from app.core.config import settings
 logger = logging.getLogger(__name__)
 
 VECTOR_SIZE = 768
+COLLECTION_INIT_RETRY_SECONDS = 30.0
 
 _client: AsyncQdrantClient | None = None
 _collection_ready = False
 _collection_lock = asyncio.Lock()
+_last_collection_init_failure_at: float | None = None
 
 
 def _get_client() -> AsyncQdrantClient:
@@ -34,12 +37,20 @@ def _get_client() -> AsyncQdrantClient:
 
 
 async def ensure_feedback_collection() -> None:
-    global _collection_ready
+    global _collection_ready, _last_collection_init_failure_at
     if _collection_ready:
         return
+    if _last_collection_init_failure_at is not None:
+        elapsed = time.monotonic() - _last_collection_init_failure_at
+        if elapsed < COLLECTION_INIT_RETRY_SECONDS:
+            return
     async with _collection_lock:
         if _collection_ready:
             return
+        if _last_collection_init_failure_at is not None:
+            elapsed = time.monotonic() - _last_collection_init_failure_at
+            if elapsed < COLLECTION_INIT_RETRY_SECONDS:
+                return
         try:
             client = _get_client()
             exists = await client.collection_exists(settings.qdrant_collection)
@@ -49,12 +60,16 @@ async def ensure_feedback_collection() -> None:
                     vectors_config=VectorParams(size=VECTOR_SIZE, distance=Distance.COSINE),
                 )
             _collection_ready = True
+            _last_collection_init_failure_at = None
         except UnexpectedResponse as exc:
             if exc.status_code == 409:
                 _collection_ready = True
+                _last_collection_init_failure_at = None
                 return
+            _last_collection_init_failure_at = time.monotonic()
             logger.warning("Qdrant collection 초기화 실패: %s", exc)
         except Exception as exc:
+            _last_collection_init_failure_at = time.monotonic()
             logger.warning("Qdrant collection 초기화 실패: %s", exc)
 
 

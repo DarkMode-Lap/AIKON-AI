@@ -1,18 +1,22 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 
 from google import genai
 
 from app.core.config import settings
 
 _client: genai.Client | None = None
+_client_lock = threading.Lock()
 
 
 def _get_client() -> genai.Client:
     global _client
     if _client is None:
-        _client = genai.Client(api_key=settings.gemini_api_key)
+        with _client_lock:
+            if _client is None:
+                _client = genai.Client(api_key=settings.gemini_api_key)
     return _client
 
 
