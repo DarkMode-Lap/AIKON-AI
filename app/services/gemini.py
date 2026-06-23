@@ -18,4 +18,4 @@ async def chat_stream(message: str) -> AsyncGenerator[str, None]:
     response = await model.generate_content_async(message, stream=True)
     async for chunk in response:
         if chunk.text:
-            yield chunk
+            yield chunk.text

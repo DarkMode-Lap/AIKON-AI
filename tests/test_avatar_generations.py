@@ -101,6 +101,7 @@ async def test_avatar_generation_saves_rag_metadata(sample_request):
         RagContextResult(
             context="Use the following prior avatar feedback as guidance.",
             retrieved_feedback_ids=[1, 2],
+            retrieval_scores=[0.7, 0.5],
         )
     )
 
@@ -108,6 +109,7 @@ async def test_avatar_generation_saves_rag_metadata(sample_request):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             create_resp = await client.post("/ai/avatar-generations", json=sample_request)
             job_id = create_resp.json()["jobId"]
+            status_resp = await client.get(f"/ai/jobs/{job_id}")
 
     async with AsyncSessionLocal() as session:
         job = await session.get(AvatarGenerationJob, job_id)
@@ -115,8 +117,11 @@ async def test_avatar_generation_saves_rag_metadata(sample_request):
     assert job is not None
     assert job.rag_enabled is True
     assert job.retrieved_feedback_ids == "[1, 2]"
+    assert job.retrieval_scores == "[0.7, 0.5]"
     assert job.prompt_text is not None
     assert job.prompt_text.startswith("Use the following prior avatar feedback as guidance.")
+    assert status_resp.json()["retrievedFeedbackIds"] == [1, 2]
+    assert status_resp.json()["retrievalScores"] == [0.7, 0.5]
     gen_mock.assert_awaited_once()
     generated_prompt = gen_mock.await_args.args[1]
     assert generated_prompt == job.prompt_text

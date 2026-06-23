@@ -27,12 +27,12 @@ def sanitize_feedback_comment(comment: str | None) -> str:
 
 
 def is_useful_feedback(feedback: dict[str, Any]) -> bool:
-    if not feedback["feedbackUseConsent"]:
+    if not feedback.get("feedbackUseConsent"):
         return False
-    if not feedback["reasons"]:
+    if not feedback.get("reasons"):
         return False
     comment = sanitize_feedback_comment(feedback.get("comment"))
-    if feedback["rating"] == "DISLIKE" and len(comment) < MIN_COMMENT_LENGTH:
+    if feedback.get("rating") == "DISLIKE" and len(comment) < MIN_COMMENT_LENGTH:
         return False
     return True
 
