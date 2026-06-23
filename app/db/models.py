@@ -26,10 +26,14 @@ class AvatarGenerationJob(Base):
     rag_enabled: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="0"
     )
+    retrieval_query: Mapped[str | None] = mapped_column(Text, nullable=True)
     retrieved_feedback_ids: Mapped[str | None] = mapped_column(Text, nullable=True)
+    retrieval_scores: Mapped[str | None] = mapped_column(Text, nullable=True)
     duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     error_code: Mapped[str | None] = mapped_column(String(50), nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    callback_status: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    callback_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), nullable=False
     )

@@ -23,6 +23,8 @@ async def process_avatar_job(job_id: str, req: AvatarGenerationRequest) -> None:
     prompt_version: str | None = None
     rag_enabled = False
     retrieved_feedback_ids: list[int] = []
+    retrieval_query: str | None = None
+    retrieval_scores: list[float] = []
     status = JobStatus.COMPLETED
     start_time = time.monotonic()
 
@@ -40,6 +42,8 @@ async def process_avatar_job(job_id: str, req: AvatarGenerationRequest) -> None:
         rag_result = await rag.retrieve_rag_context(req.style, req.gender, req.ageRange)
         rag_enabled = bool(rag_result.context)
         retrieved_feedback_ids = rag_result.retrieved_feedback_ids
+        retrieval_query = rag_result.retrieval_query or None
+        retrieval_scores = rag_result.retrieval_scores or []
         prompt_text = (
             f"{rag_result.context}\n\n{base_prompt}" if rag_result.context else base_prompt
         )
@@ -80,9 +84,11 @@ async def process_avatar_job(job_id: str, req: AvatarGenerationRequest) -> None:
                 job.prompt_version = prompt_version
                 job.prompt_text = prompt_text
                 job.rag_enabled = rag_enabled
+                job.retrieval_query = retrieval_query
                 job.retrieved_feedback_ids = (
                     json.dumps(retrieved_feedback_ids) if retrieved_feedback_ids else None
                 )
+                job.retrieval_scores = json.dumps(retrieval_scores) if retrieval_scores else None
                 job.duration_ms = duration_ms
                 job.error_code = error_code
                 job.error_message = error_message
@@ -104,5 +110,19 @@ async def process_avatar_job(job_id: str, req: AvatarGenerationRequest) -> None:
     )
     try:
         await callback.send_callback(req.callbackUrl, payload)
+        callback_status = "SENT"
+        callback_error = None
     except Exception as cb_exc:
         logger.error("콜백 전송 중 예외 발생 job_id=%s: %s", job_id, cb_exc)
+        callback_status = "FAILED"
+        callback_error = str(cb_exc)
+
+    try:
+        async with AsyncSessionLocal() as session:
+            job = await session.get(AvatarGenerationJob, job_id)
+            if job:
+                job.callback_status = callback_status
+                job.callback_error = callback_error
+                await session.commit()
+    except Exception as db_exc:
+        logger.error("콜백 상태 저장 중 DB 오류 발생 job_id=%s: %s", job_id, db_exc)

@@ -4,6 +4,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
+from app.core.config import settings
 from app.db.vector_store import is_feedback_collection_ready, search_similar
 from app.schemas.avatar import AvatarAgeRange, AvatarGender, AvatarStyle
 from app.services.embedding import embed_text
@@ -15,6 +16,8 @@ logger = logging.getLogger(__name__)
 class RagContextResult:
     context: str
     retrieved_feedback_ids: list[int]
+    retrieval_query: str = ""
+    retrieval_scores: list[float] | None = None
 
 
 async def retrieve_rag_context(
@@ -48,13 +51,22 @@ async def retrieve_rag_context(
         logger.warning("RAG 컨텍스트 조회 실패: %s", exc)
         return RagContextResult(context="", retrieved_feedback_ids=[])
 
+    results = [
+        result for result in results if float(result.get("score") or 0.0) >= settings.rag_min_score
+    ]
     context = build_rag_context(results)
     feedback_ids = [
         int(result["payload"]["feedbackId"])
         for result in results
         if result.get("payload", {}).get("feedbackId") is not None
     ]
-    return RagContextResult(context=context, retrieved_feedback_ids=feedback_ids)
+    scores = [float(result.get("score") or 0.0) for result in results]
+    return RagContextResult(
+        context=context,
+        retrieved_feedback_ids=feedback_ids,
+        retrieval_query=query_text,
+        retrieval_scores=scores,
+    )
 
 
 def build_rag_context(results: list[dict[str, Any]]) -> str:

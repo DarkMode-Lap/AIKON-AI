@@ -37,6 +37,25 @@ async def init_db() -> None:
                         "ADD COLUMN retrieved_feedback_ids TEXT"
                     )
                 )
+            if "retrieval_query" not in columns:
+                await conn.execute(
+                    text("ALTER TABLE avatar_generation_jobs ADD COLUMN retrieval_query TEXT")
+                )
+            if "retrieval_scores" not in columns:
+                await conn.execute(
+                    text("ALTER TABLE avatar_generation_jobs ADD COLUMN retrieval_scores TEXT")
+                )
+            if "callback_status" not in columns:
+                await conn.execute(
+                    text(
+                        "ALTER TABLE avatar_generation_jobs "
+                        "ADD COLUMN callback_status VARCHAR(20)"
+                    )
+                )
+            if "callback_error" not in columns:
+                await conn.execute(
+                    text("ALTER TABLE avatar_generation_jobs ADD COLUMN callback_error TEXT")
+                )
 
 
 async def get_session() -> AsyncGenerator[AsyncSession, None]:

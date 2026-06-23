@@ -57,6 +57,12 @@ class JobStatusResponse(BaseModel):
     generatedImageUri: str | None
     modelName: str | None
     errorCode: str | None
+    ragEnabled: bool = False
+    retrievedFeedbackIds: str | None = None
+    retrievalQuery: str | None = None
+    retrievalScores: str | None = None
+    callbackStatus: str | None = None
+    callbackError: str | None = None
     createdAt: datetime
 
 

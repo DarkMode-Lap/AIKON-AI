@@ -54,5 +54,11 @@ async def get_job_status(
         generatedImageUri=job.generated_image_uri,
         modelName=job.model_name,
         errorCode=job.error_code,
+        ragEnabled=job.rag_enabled,
+        retrievedFeedbackIds=job.retrieved_feedback_ids,
+        retrievalQuery=job.retrieval_query,
+        retrievalScores=job.retrieval_scores,
+        callbackStatus=job.callback_status,
+        callbackError=job.callback_error,
         createdAt=job.created_at,
     )
