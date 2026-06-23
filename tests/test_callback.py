@@ -33,4 +33,4 @@ async def test_send_callback_adds_token_header(monkeypatch):
     )
 
     post.assert_awaited_once()
-    assert post.await_args.kwargs["headers"] == {"X-AIKON-Callback-Token": "callback-secret"}
+    assert post.await_args.kwargs["headers"] == {"X-Internal-Secret": "callback-secret"}

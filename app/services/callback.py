@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 async def send_callback(callback_url: str, payload: AvatarCallbackPayload) -> None:
     headers = {}
     if settings.spring_callback_token:
-        headers["X-AIKON-Callback-Token"] = settings.spring_callback_token
+        headers["X-Internal-Secret"] = settings.spring_callback_token
     async with httpx.AsyncClient(timeout=10.0) as client:
         try:
             response = await client.post(
