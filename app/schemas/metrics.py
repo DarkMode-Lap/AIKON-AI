@@ -45,3 +45,13 @@ class FeedbackMetrics(BaseModel):
     byPromptVersion: dict[str, PromptVersionFeedbackStat]
     trainingConsentCount: int
     feedbackUseConsentCount: int
+
+
+class RagImpactMetrics(BaseModel):
+    totalCount: int
+    ragEnabledCount: int
+    ragDisabledCount: int
+    ragHitRate: float
+    ragLikeRate: float
+    nonRagLikeRate: float
+    avgRetrievalScore: float | None

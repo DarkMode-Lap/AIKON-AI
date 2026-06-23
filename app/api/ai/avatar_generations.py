@@ -1,3 +1,4 @@
+import json
 from uuid import uuid4
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
@@ -54,5 +55,13 @@ async def get_job_status(
         generatedImageUri=job.generated_image_uri,
         modelName=job.model_name,
         errorCode=job.error_code,
+        ragEnabled=job.rag_enabled,
+        retrievedFeedbackIds=json.loads(job.retrieved_feedback_ids)
+        if job.retrieved_feedback_ids
+        else None,
+        retrievalQuery=job.retrieval_query,
+        retrievalScores=json.loads(job.retrieval_scores) if job.retrieval_scores else None,
+        callbackStatus=job.callback_status,
+        callbackError=job.callback_error,
         createdAt=job.created_at,
     )

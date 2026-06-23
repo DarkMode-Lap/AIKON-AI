@@ -6,7 +6,11 @@ from httpx import ASGITransport, AsyncClient
 from app.db import vector_store
 from app.db.database import Base, engine, init_db
 from app.schemas.avatar import AvatarAgeRange, AvatarGender, AvatarStyle
-from app.services.feedback_pipeline import build_rag_document, process_feedback_for_rag
+from app.services.feedback_pipeline import (
+    build_rag_document,
+    process_feedback_for_rag,
+    sanitize_feedback_comment,
+)
 from app.services.rag import build_rag_context, retrieve_rag_context
 from main import app
 
@@ -42,6 +46,21 @@ def test_build_rag_document_uses_structured_format():
     assert "feedback: 원본 얼굴 특징이 약하게 반영되었고 눈매가 달라짐" in document
 
 
+def test_sanitize_feedback_comment_masks_sensitive_values():
+    comment = "연락처 test@example.com 010-1234-5678 https://example.com/a /tmp/source/a.png"
+
+    sanitized = sanitize_feedback_comment(comment)
+
+    assert "test@example.com" not in sanitized
+    assert "010-1234-5678" not in sanitized
+    assert "https://example.com/a" not in sanitized
+    assert "/tmp/source/a.png" not in sanitized
+    assert "[email]" in sanitized
+    assert "[phone]" in sanitized
+    assert "[uri]" in sanitized
+    assert "[path]" in sanitized
+
+
 @pytest.mark.asyncio
 async def test_process_feedback_skips_without_consent(monkeypatch):
     ready = AsyncMock(return_value=True)
@@ -67,6 +86,22 @@ async def test_process_feedback_skips_when_qdrant_unavailable(monkeypatch):
 
     await process_feedback_for_rag(_feedback_snapshot())
 
+    embed.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_process_feedback_skips_low_quality_dislike(monkeypatch):
+    ready = AsyncMock(return_value=True)
+    embed = AsyncMock()
+    monkeypatch.setattr("app.services.feedback_pipeline.is_feedback_collection_ready", ready)
+    monkeypatch.setattr("app.services.feedback_pipeline.embed_text", embed)
+
+    feedback = _feedback_snapshot()
+    feedback["comment"] = "별로"
+
+    await process_feedback_for_rag(feedback)
+
+    ready.assert_not_called()
     embed.assert_not_called()
 
 
@@ -106,10 +141,11 @@ async def test_retrieve_rag_context_falls_back_to_style_only(monkeypatch):
     search = AsyncMock(
         side_effect=[
             [],
-            [
-                {
-                    "payload": {
-                        "feedbackId": 7,
+                [
+                    {
+                        "score": 0.7,
+                        "payload": {
+                            "feedbackId": 7,
                         "rating": "DISLIKE",
                         "reasons": ["TOO_DIFFERENT"],
                         "comment": "preserve facial features",
@@ -135,6 +171,38 @@ async def test_retrieve_rag_context_falls_back_to_style_only(monkeypatch):
     assert search.await_args_list[1].kwargs["age_range"] is None
     assert result.retrieved_feedback_ids == [7]
     assert "Negative feedback patterns to avoid:" in result.context
+
+
+@pytest.mark.asyncio
+async def test_retrieve_rag_context_filters_low_scores(monkeypatch):
+    ready = AsyncMock(return_value=True)
+    embed = AsyncMock(return_value=[0.1] * 768)
+    search = AsyncMock(
+        return_value=[
+            {
+                "score": 0.1,
+                "payload": {
+                    "feedbackId": 7,
+                    "rating": "DISLIKE",
+                    "reasons": ["TOO_DIFFERENT"],
+                },
+            }
+        ],
+    )
+    monkeypatch.setattr("app.services.rag.settings.rag_min_score", 0.2)
+    monkeypatch.setattr("app.services.rag.is_feedback_collection_ready", ready)
+    monkeypatch.setattr("app.services.rag.embed_text", embed)
+    monkeypatch.setattr("app.services.rag.search_similar", search)
+
+    result = await retrieve_rag_context(
+        AvatarStyle.STUDIO,
+        AvatarGender.MALE,
+        AvatarAgeRange.AGE_20_PLUS,
+    )
+
+    assert result.context == ""
+    assert result.retrieved_feedback_ids == []
+    assert result.retrieval_scores == []
 
 
 @pytest.mark.asyncio

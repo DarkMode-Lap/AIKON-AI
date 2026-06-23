@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, Query
@@ -13,6 +14,7 @@ from app.schemas.metrics import (
     GenerationMetrics,
     PromptVersionFeedbackStat,
     PromptVersionStat,
+    RagImpactMetrics,
     StyleFeedbackStat,
     StyleStat,
 )
@@ -190,4 +192,108 @@ async def get_feedback_metrics(
         byPromptVersion=by_prompt,
         trainingConsentCount=row.training_consent or 0,
         feedbackUseConsentCount=row.feedback_use or 0,
+    )
+
+
+@router.get("/rag-impact", response_model=RagImpactMetrics)
+async def get_rag_impact_metrics(
+    style: str | None = Query(default=None),
+    prompt_version: str | None = Query(default=None),
+    days: int = Query(default=30, ge=1),
+    session: AsyncSession = Depends(get_session),
+) -> RagImpactMetrics:
+    since = datetime.now(UTC) - timedelta(days=days)
+
+    def _base_where(stmt):
+        stmt = stmt.where(AvatarGenerationJob.created_at >= since)
+        if style:
+            stmt = stmt.where(AvatarGenerationJob.style == style)
+        if prompt_version:
+            stmt = stmt.where(AvatarGenerationJob.prompt_version == prompt_version)
+        return stmt
+
+    total_stmt = _base_where(
+        select(
+            func.count(AvatarGenerationJob.id).label("total"),
+            func.sum(case((AvatarGenerationJob.rag_enabled.is_(True), 1), else_=0)).label(
+                "rag_enabled"
+            ),
+        )
+    )
+    row = (await session.execute(total_stmt)).one()
+    total = row.total or 0
+    rag_enabled = row.rag_enabled or 0
+
+    feedback_join = AvatarFeedback.job_id == AvatarGenerationJob.id
+    like_stmt = _base_where(
+        select(
+            func.sum(
+                case(
+                    (
+                        (AvatarGenerationJob.rag_enabled.is_(True))
+                        & (AvatarFeedback.rating == "LIKE"),
+                        1,
+                    ),
+                    else_=0,
+                )
+            ).label("rag_likes"),
+            func.sum(
+                case(
+                    (
+                        (AvatarGenerationJob.rag_enabled.is_(True))
+                        & (AvatarFeedback.id.is_not(None)),
+                        1,
+                    ),
+                    else_=0,
+                )
+            ).label("rag_feedbacks"),
+            func.sum(
+                case(
+                    (
+                        (AvatarGenerationJob.rag_enabled.is_(False))
+                        & (AvatarFeedback.rating == "LIKE"),
+                        1,
+                    ),
+                    else_=0,
+                )
+            ).label("non_rag_likes"),
+            func.sum(
+                case(
+                    (
+                        (AvatarGenerationJob.rag_enabled.is_(False))
+                        & (AvatarFeedback.id.is_not(None)),
+                        1,
+                    ),
+                    else_=0,
+                )
+            ).label("non_rag_feedbacks"),
+        ).outerjoin(AvatarFeedback, feedback_join)
+    )
+    like_row = (await session.execute(like_stmt)).one()
+    rag_feedbacks = like_row.rag_feedbacks or 0
+    non_rag_feedbacks = like_row.non_rag_feedbacks or 0
+
+    score_stmt = _base_where(
+        select(AvatarGenerationJob.retrieval_scores).where(
+            AvatarGenerationJob.retrieval_scores.is_not(None)
+        )
+    )
+    scores: list[float] = []
+    result = await session.stream_scalars(score_stmt)
+    async for retrieval_scores in result:
+        try:
+            scores.extend(float(value) for value in json.loads(retrieval_scores))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+
+    return RagImpactMetrics(
+        totalCount=total,
+        ragEnabledCount=rag_enabled,
+        ragDisabledCount=total - rag_enabled,
+        ragHitRate=rag_enabled / total if total else 0.0,
+        ragLikeRate=(like_row.rag_likes or 0) / rag_feedbacks if rag_feedbacks else 0.0,
+        nonRagLikeRate=(like_row.non_rag_likes or 0) / non_rag_feedbacks
+        if non_rag_feedbacks
+        else 0.0,
+        avgRetrievalScore=sum(scores) / len(scores) if scores else None,
     )
