@@ -18,7 +18,10 @@ class DatasetRow(BaseModel):
 
 
 class DatasetExportResponse(BaseModel):
+    exportJobId: str
+    status: str
+    trainUri: str
+    evalUri: str
+    manifestUri: str
     trainCount: int
     evalCount: int
-    trainData: list[DatasetRow]
-    evalData: list[DatasetRow]

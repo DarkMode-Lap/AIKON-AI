@@ -29,10 +29,9 @@ def _download_sync(s3_uri: str) -> bytes:
     return response["Body"].read()
 
 
-def _upload_sync(data: bytes, avatar_id: int) -> str:
-    key = f"avatars/{avatar_id}.png"
+def _upload_sync(data: bytes, key: str, content_type: str) -> str:
     client = _make_client()
-    client.put_object(Bucket=settings.s3_bucket, Key=key, Body=data, ContentType="image/png")
+    client.put_object(Bucket=settings.s3_bucket, Key=key, Body=data, ContentType=content_type)
     return f"s3://{settings.s3_bucket}/{key}"
 
 
@@ -41,7 +40,11 @@ async def download_image(s3_uri: str) -> bytes:
 
 
 async def upload_image(data: bytes, avatar_id: int) -> str:
-    return await asyncio.to_thread(_upload_sync, data, avatar_id)
+    return await asyncio.to_thread(_upload_sync, data, f"avatars/{avatar_id}.png", "image/png")
 
 
-__all__ = ["download_image", "upload_image", "ClientError"]
+async def upload_text(data: str, key: str, content_type: str = "application/json") -> str:
+    return await asyncio.to_thread(_upload_sync, data.encode("utf-8"), key, content_type)
+
+
+__all__ = ["download_image", "upload_image", "upload_text", "ClientError"]
