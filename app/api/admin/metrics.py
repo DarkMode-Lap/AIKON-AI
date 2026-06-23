@@ -279,9 +279,10 @@ async def get_rag_impact_metrics(
         )
     )
     scores: list[float] = []
-    for score_row in (await session.execute(score_stmt)).all():
+    result = await session.stream_scalars(score_stmt)
+    async for retrieval_scores in result:
         try:
-            scores.extend(float(value) for value in json.loads(score_row.retrieval_scores))
+            scores.extend(float(value) for value in json.loads(retrieval_scores))
         except (TypeError, ValueError, json.JSONDecodeError):
             continue
 
