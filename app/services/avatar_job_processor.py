@@ -47,7 +47,12 @@ async def process_avatar_job(job_id: str, req: AvatarGenerationRequest) -> None:
         prompt_text = (
             f"{rag_result.context}\n\n{base_prompt}" if rag_result.context else base_prompt
         )
-        output_bytes = await gemini_image.generate_avatar_image(source_bytes, prompt_text)
+        source_mime_type = gemini_image.infer_image_mime_type(req.sourceImageUri)
+        output_bytes = await gemini_image.generate_avatar_image(
+            source_bytes,
+            prompt_text,
+            source_mime_type,
+        )
         generated_uri = await s3.upload_image(output_bytes, req.avatarId)
 
     except ClientError as exc:

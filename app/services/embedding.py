@@ -4,6 +4,7 @@ import asyncio
 import threading
 
 from google import genai
+from google.genai import types
 
 from app.core.config import settings
 
@@ -23,8 +24,9 @@ def _get_client() -> genai.Client:
 async def embed_text(text: str) -> list[float]:
     def _embed() -> list[float]:
         response = _get_client().models.embed_content(
-            model="text-embedding-004",
+            model="gemini-embedding-001",
             contents=text,
+            config=types.EmbedContentConfig(output_dimensionality=768),
         )
         if not response.embeddings:
             raise ValueError("Gemini embedding 응답에 embeddings가 없습니다")
